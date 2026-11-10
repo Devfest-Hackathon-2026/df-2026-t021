@@ -1,0 +1,92 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  mobile:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:navigation
+      - run: npm run build
+      - run: npm run build:hosting
+        env:
+          VITE_FIREBASE_API_KEY: ci-build-placeholder
+          VITE_FIREBASE_AUTH_DOMAIN: tasuku-77c63.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: tasuku-77c63
+      - run: npm run format:check
+      - run: npm run api:types && git diff --exit-code apps/mobile/src/types/api.generated.ts
+  backend:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEMO_MODE: "true"
+      STORAGE_BACKEND: memory
+      GEMINI_API_KEY: ""
+      FIREBASE_PROJECT_ID: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run setup:backend
+      - run: npm run lint:backend
+      - run: node scripts/backend.mjs check-format
+      - run: npm run test:backend
+      - run: npm run api:export && git diff --exit-code docs/openapi.json
+
+  firebase:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci
+      - run: pip install -r backend/requirements.lock.txt
+      - uses: actions/cache@v4
+        with:
+          path: .cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm run test:firebase
